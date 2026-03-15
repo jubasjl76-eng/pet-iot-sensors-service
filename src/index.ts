@@ -1,13 +1,12 @@
 /**
  * Pet IoT Sensors Service
- * Main entry point
+ * Main entry point - sends sensor data to backend API
  */
 
 import express from 'express';
 import { config } from './config/index.js';
-import { initializeDatabase } from './database/index.js';
 import { mqttClient } from './mqtt/index.js';
-import sensorRoutes from './routes/index.js';
+import { backendClient } from './services/backendClient.js';
 
 async function main() {
   console.log(`
@@ -16,15 +15,12 @@ async function main() {
 ╠═══════════════════════════════════════════════════════════╣
 ║  Port:      ${config.port.toString().padEnd(39)}║
 ║  MQTT:      ${`${config.mqttHost}:${config.mqttPort}`.padEnd(39)}║
-║  PostgreSQL: ${`${config.pgHost}:${config.pgPort}`.padEnd(39)}║
+║  Backend:   ${backendClient.getBackendUrl().padEnd(39)}║
+║  API Key:   ${config.apiKey.substring(0, 10).padEnd(39)}║
 ╚═══════════════════════════════════════════════════════════╝
   `);
 
   try {
-    // Initialize database
-    await initializeDatabase();
-    console.log('[Service] Database initialized');
-
     // Connect to MQTT
     await mqttClient.connect();
     console.log('[Service] MQTT connected');
@@ -33,8 +29,25 @@ async function main() {
     const app = express();
     app.use(express.json());
 
-    // Routes
-    app.use('/api', sensorRoutes);
+    // Health endpoint
+    app.get('/health', (_req, res) => {
+      res.json({ 
+        status: 'ok', 
+        service: 'sensors',
+        online: backendClient.isOnline(),
+        backend: backendClient.getBackendUrl(),
+        timestamp: new Date().toISOString() 
+      });
+    });
+
+    // Status endpoint
+    app.get('/api/status', (_req, res) => {
+      res.json({
+        mqtt: mqttClient.isConnected(),
+        backendOnline: backendClient.isOnline(),
+        backendUrl: backendClient.getBackendUrl(),
+      });
+    });
 
     // Start server
     app.listen(config.port, () => {
@@ -54,6 +67,7 @@ async function main() {
 
 function shutdown() {
   console.log('\n[Service] Shutting down...');
+  backendClient.stop();
   mqttClient.disconnect();
   process.exit(0);
 }

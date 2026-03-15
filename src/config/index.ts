@@ -9,16 +9,15 @@ export interface Config {
   mqttUsername?: string;
   mqttPassword?: string;
   
-  // PostgreSQL
-  pgHost: string;
-  pgPort: number;
-  pgDatabase: string;
-  pgUser: string;
-  pgPassword: string;
+  // Backend URLs (Edge/Cloud)
+  localBackendUrl?: string;
+  cloudBackendUrl?: string;
   
-  // Backend API
-  apiUrl: string;
+  // API
   apiKey: string;
+  
+  // Offline queue
+  offlineQueueFile: string;
   
   // Alerts
   temperatureHigh: number;
@@ -33,14 +32,13 @@ export const config: Config = {
   mqttUsername: process.env.MQTT_USERNAME,
   mqttPassword: process.env.MQTT_PASSWORD,
   
-  pgHost: process.env.PG_HOST || 'localhost',
-  pgPort: parseInt(process.env.PG_PORT || '5432'),
-  pgDatabase: process.env.PG_DATABASE || 'sensors',
-  pgUser: process.env.PG_USER || 'postgres',
-  pgPassword: process.env.PG_PASSWORD || 'postgres',
+  // Backend URLs - automatically selects local or cloud
+  localBackendUrl: process.env.LOCAL_BACKEND_URL,
+  cloudBackendUrl: process.env.CLOUD_BACKEND_URL,
   
-  apiUrl: process.env.API_URL || 'http://localhost:3000',
   apiKey: process.env.API_KEY || 'smart-pet-api-key-2026',
+  
+  offlineQueueFile: process.env.OFFLINE_QUEUE_FILE || './data/offline-queue.json',
   
   // Alert thresholds
   temperatureHigh: parseInt(process.env.TEMP_HIGH || '30'),

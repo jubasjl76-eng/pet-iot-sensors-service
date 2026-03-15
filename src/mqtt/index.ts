@@ -5,7 +5,7 @@
 import mqtt, { MqttClient, IClientOptions } from 'mqtt';
 import { EventEmitter } from 'events';
 import { config } from '../config/index.js';
-import { storage } from '../storage/index.js';
+import { backendClient } from '../services/backendClient.js';
 
 export class MQTTSensorClient extends EventEmitter {
   private client: MqttClient | null = null;
@@ -96,34 +96,20 @@ export class MQTTSensorClient extends EventEmitter {
       
       console.log(`[MQTT] Sensor message on ${topic}:`, payload);
 
-      // Register or update sensor
-      storage.upsertSensor({
-        sensorId: deviceId,
-        sensorType: this.mapSensorType(sensorType),
-        kennelId,
-        name: payload.name || deviceId,
-        location: payload.location,
-      });
-
-      // Store event
-      storage.storeSensorEvent({
-        sensorId: deviceId,
+      const sensorData = {
+        deviceId,
+        deviceType: this.mapSensorType(sensorType),
         eventType: sensorType,
         value: payload.value || payload.temperature || payload.humidity || payload.co2 || 0,
         unit: payload.unit || this.getUnit(sensorType),
-      });
+        timestamp: Date.now(),
+        kennelId,
+      };
 
-      // Update health
-      storage.updateSensorHealth({
-        sensorId: deviceId,
-        isOnline: true,
-        battery: payload.battery,
-        signal: payload.rssi,
-      });
+      // Send to backend (queues offline if unavailable)
+      backendClient.sendDeviceData(sensorData);
 
-      // Check thresholds and trigger alerts
-      this.checkThresholds(deviceId, kennelId, sensorType, payload.value || payload.temperature || payload.humidity || 0);
-
+      // Emit event for local processing
       this.emit('sensorData', { deviceId, kennelId, sensorType, payload });
       
     } catch (error) {
@@ -151,36 +137,6 @@ export class MQTTSensorClient extends EventEmitter {
       motion: 'boolean',
     };
     return units[type] || '';
-  }
-
-  private async checkThresholds(sensorId: string, kennelId: string, sensorType: string, value: number): Promise<void> {
-    if (sensorType === 'temperature') {
-      if (value > config.temperatureHigh) {
-        await storage.createAlert({
-          alertId: `alert_${Date.now()}`,
-          sensorId,
-          kennelId,
-          alertType: 'temperature_high',
-          severity: 'critical',
-          title: 'High Temperature Alert',
-          message: `Temperature too high: ${value}°C`,
-          value,
-          threshold: config.temperatureHigh,
-        });
-      } else if (value < config.temperatureLow) {
-        await storage.createAlert({
-          alertId: `alert_${Date.now()}`,
-          sensorId,
-          kennelId,
-          alertType: 'temperature_low',
-          severity: 'warning',
-          title: 'Low Temperature Alert',
-          message: `Temperature too low: ${value}°C`,
-          value,
-          threshold: config.temperatureLow,
-        });
-      }
-    }
   }
 
   isConnected(): boolean {
