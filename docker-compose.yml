@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  sensors:
+    build: .
+    container_name: pet-sensors-service
+    restart: unless-stopped
+    environment:
+      - PORT=3005
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+      - PG_HOST=postgres
+      - PG_DATABASE=sensors
+      - PG_USER=postgres
+      - PG_PASSWORD=postgres
+    ports:
+      - "3005:3005"
+    networks:
+      - iot-network
+    depends_on:
+      - mosquitto
+      - postgres
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: pet-mosquitto
+    ports:
+      - "1883:1883"
+    networks:
+      - iot-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: pet-sensors-db
+    environment:
+      - POSTGRES_DB=sensors
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+    networks:
+      - iot-network
+
+networks:
+  iot-network:
+    driver: bridge
