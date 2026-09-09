@@ -15,7 +15,8 @@
     "axios": "^1.7.9",
     "dotenv": "^16.4.0",
     "express": "^4.21.2",
-    "mqtt": "^5.10.0"
+    "mqtt": "^5.10.0",
+    "@jubasjl76-eng/shared": "git+https://github.com/jubasjl76-eng/smart-pet-shared.git#shared-v0.1.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

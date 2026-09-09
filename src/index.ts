@@ -4,9 +4,14 @@
  */
 
 import express from 'express';
+import type { Server } from 'http';
 import { config } from './config/index.js';
 import { mqttClient } from './mqtt/index.js';
 import { backendClient } from './services/backendClient.js';
+
+const startedAt = Date.now();
+let server: Server | undefined;
+let shuttingDown = false;
 
 async function main() {
   console.log(`
@@ -20,56 +25,72 @@ async function main() {
 ╚═══════════════════════════════════════════════════════════╝
   `);
 
+  const app = express();
+  app.use(express.json());
+
+  // Liveness: the process is up. Always 200.
+  app.get('/health', (_req, res) => {
+    res.json({ status: 'ok', service: 'sensors', uptimeS: Math.round((Date.now() - startedAt) / 1000) });
+  });
+
+  // Readiness: safe to route traffic. 503 until the MQTT dep is connected.
+  app.get('/ready', (_req, res) => {
+    const mqtt = mqttClient.isConnected();
+    res.status(mqtt && !shuttingDown ? 200 : 503).json({
+      status: mqtt && !shuttingDown ? 'ready' : 'not-ready',
+      mqtt,
+      backendOnline: backendClient.isOnline(), // informational — offline queue tolerates a down backend
+      shuttingDown,
+    });
+  });
+
+  app.get('/api/status', (_req, res) => {
+    res.json({
+      mqtt: mqttClient.isConnected(),
+      backendOnline: backendClient.isOnline(),
+      backendUrl: backendClient.getBackendUrl(),
+    });
+  });
+
+  // Connect MQTT before we start listening so /ready flips true promptly.
   try {
-    // Connect to MQTT
     await mqttClient.connect();
     console.log('[Service] MQTT connected');
-
-    // Start Express server
-    const app = express();
-    app.use(express.json());
-
-    // Health endpoint
-    app.get('/health', (_req, res) => {
-      res.json({ 
-        status: 'ok', 
-        service: 'sensors',
-        online: backendClient.isOnline(),
-        backend: backendClient.getBackendUrl(),
-        timestamp: new Date().toISOString() 
-      });
-    });
-
-    // Status endpoint
-    app.get('/api/status', (_req, res) => {
-      res.json({
-        mqtt: mqttClient.isConnected(),
-        backendOnline: backendClient.isOnline(),
-        backendUrl: backendClient.getBackendUrl(),
-      });
-    });
-
-    // Start server
-    app.listen(config.port, () => {
-      console.log(`[Service] Server running on port ${config.port}`);
-      console.log('[Service] =========================================');
-    });
-
-    // Handle shutdown
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
-
   } catch (error) {
-    console.error('[Service] Failed to start:', error);
-    process.exit(1);
+    console.error('[Service] MQTT connect failed, will retry in background:', error);
   }
+
+  server = app.listen(config.port, () => {
+    console.log(`[Service] Server running on port ${config.port}`);
+    console.log('[Service] =========================================');
+  });
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
-function shutdown() {
-  console.log('\n[Service] Shutting down...');
-  backendClient.stop();
-  mqttClient.disconnect();
-  process.exit(0);
+function shutdown(signal?: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n[Service] ${signal ?? 'shutdown'} — draining...`);
+
+  // Force-exit if draining hangs past the orchestrator's grace period.
+  const guard = setTimeout(() => {
+    console.error('[Service] drain timed out, forcing exit');
+    process.exit(1);
+  }, 10_000);
+  guard.unref();
+
+  const done = () => {
+    backendClient.stop();
+    mqttClient.disconnect();
+    clearTimeout(guard);
+    console.log('[Service] stopped');
+    process.exit(0);
+  };
+
+  if (server) server.close(() => done());
+  else done();
 }
 
 main();
