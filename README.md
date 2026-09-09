@@ -19,10 +19,18 @@ Handles all IoT sensor data for kennels and pet owners.
 ## Features
 
 - Subscribe to MQTT topics for sensor events
-- Store sensor data in PostgreSQL
-- Track sensor health status
-- Trigger alerts when thresholds exceeded
-- REST API for dashboard and mobile apps
+  (`kennel/{k}/sensor/{id}/{temperature|humidity|airquality}`, `kennel/{k}/{door|motion}/{id}/status`)
+- Store readings + health in PostgreSQL
+- Threshold alerts: temperature high/low, humidity high/low, air quality poor,
+  door open, motion detected — de-duplicated (`ALERT_DEDUPE_MINUTES`, default 15)
+- REST API under `/api`; `/health` at the root for the load balancer
+
+## Env
+
+`PORT` (3005), `MQTT_HOST` / `MQTT_PORT` / `MQTT_USERNAME` / `MQTT_PASSWORD`,
+`PG_HOST` / `PG_PORT` / `PG_DATABASE` / `PG_USER` / `PG_PASSWORD`,
+`TEMP_HIGH` (30) / `TEMP_LOW` (10) / `HUMIDITY_HIGH` (80) / `HUMIDITY_LOW` (25) /
+`AIR_QUALITY_HIGH` (1200) / `ALERT_DEDUPE_MINUTES` (15).
 
 ## Quick Start
 

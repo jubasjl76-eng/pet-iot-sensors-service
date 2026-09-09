@@ -7,22 +7,22 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "build": "tsc",
-    "test": "vitest",
-    "db:migrate": "tsx src/database/migrate.ts",
+    "test": "vitest run --passWithNoTests",
     "docker:build": "docker build -t pet-iot-sensors-service .",
-    "docker:run": "docker run -d -p 3005:3005 --network host pet-iot-sensors-service"
+    "docker:run": "docker run -d -p 3005:3005 pet-iot-sensors-service"
   },
   "dependencies": {
+    "dotenv": "^16.4.0",
+    "express": "^4.21.2",
+    "express-validator": "^7.2.0",
     "mqtt": "^5.10.0",
     "pg": "^8.13.1",
-    "axios": "^1.7.9",
-    "dotenv": "^16.4.0",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.11.10",
-    "@types/uuid": "^10.0.0",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vitest": "^3.0.0"

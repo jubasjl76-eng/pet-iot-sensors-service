@@ -1,61 +1,47 @@
 /**
- * Pet IoT Sensors Service
- * Main entry point
+ * Pet IoT Sensors Service — entry point.
  */
-
-import express from 'express';
-import { config } from './config/index.js';
-import { initializeDatabase } from './database/index.js';
-import { mqttClient } from './mqtt/index.js';
-import sensorRoutes from './routes/index.js';
+import "dotenv/config";
+import express from "express";
+import { config } from "./config/index.js";
+import { initializeDatabase } from "./database/index.js";
+import { mqttClient } from "./mqtt/index.js";
+import sensorRoutes from "./routes/index.js";
 
 async function main() {
-  console.log(`
-╔═══════════════════════════════════════════════════════════╗
-║         🐾 Pet IoT Sensors Service v1.0.0 🐾           ║
-╠═══════════════════════════════════════════════════════════╣
-║  Port:      ${config.port.toString().padEnd(39)}║
-║  MQTT:      ${`${config.mqttHost}:${config.mqttPort}`.padEnd(39)}║
-║  PostgreSQL: ${`${config.pgHost}:${config.pgPort}`.padEnd(39)}║
-╚═══════════════════════════════════════════════════════════╝
-  `);
+  console.log(`[sensors] starting on :${config.port}  mqtt=${config.mqttHost}:${config.mqttPort}  pg=${config.pgHost}:${config.pgPort}`);
 
-  try {
-    // Initialize database
-    await initializeDatabase();
-    console.log('[Service] Database initialized');
+  await initializeDatabase();
+  console.log("[sensors] database ready");
 
-    // Connect to MQTT
-    await mqttClient.connect();
-    console.log('[Service] MQTT connected');
+  const app = express();
+  app.use(express.json());
 
-    // Start Express server
-    const app = express();
-    app.use(express.json());
+  // ALB / ECS health check (also available at /api/health).
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", service: "sensors", mqtt: mqttClient.isConnected() });
+  });
+  app.use("/api", sensorRoutes);
 
-    // Routes
-    app.use('/api', sensorRoutes);
+  app.listen(config.port, () => console.log(`[sensors] http on :${config.port}`));
 
-    // Start server
-    app.listen(config.port, () => {
-      console.log(`[Service] Server running on port ${config.port}`);
-      console.log('[Service] =========================================');
-    });
+  // MQTT is not required for the HTTP API to be healthy; connect in the
+  // background and keep retrying (mqtt.js reconnects on its own).
+  mqttClient.connect().catch((err) => {
+    console.error("[sensors] initial MQTT connect failed, will retry:", err.message);
+  });
 
-    // Handle shutdown
-    process.on('SIGINT', shutdown);
-    process.on('SIGTERM', shutdown);
-
-  } catch (error) {
-    console.error('[Service] Failed to start:', error);
-    process.exit(1);
-  }
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 function shutdown() {
-  console.log('\n[Service] Shutting down...');
+  console.log("[sensors] shutting down");
   mqttClient.disconnect();
   process.exit(0);
 }
 
-main();
+main().catch((err) => {
+  console.error("[sensors] fatal:", err);
+  process.exit(1);
+});

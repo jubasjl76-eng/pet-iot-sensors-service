@@ -2,184 +2,137 @@
  * MQTT Client for Sensor Communication
  */
 
-import mqtt, { MqttClient, IClientOptions } from 'mqtt';
-import { EventEmitter } from 'events';
-import { config } from '../config/index.js';
-import { storage } from '../storage/index.js';
+import mqtt, { MqttClient, IClientOptions } from "mqtt";
+import { EventEmitter } from "events";
+import { randomUUID } from "crypto";
+import { config } from "../config/index.js";
+import { storage } from "../storage/index.js";
+import { classifyTopic, readingValue } from "./topic.js";
+import { evaluateThresholds } from "./alerts.js";
+
+const TOPICS = [
+  "kennel/+/sensor/+/temperature",
+  "kennel/+/sensor/+/humidity",
+  "kennel/+/sensor/+/airquality",
+  "kennel/+/door/+/status",
+  "kennel/+/motion/+/status",
+];
 
 export class MQTTSensorClient extends EventEmitter {
   private client: MqttClient | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 20;
-
-  constructor() {
-    super();
-  }
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const url = `mqtt://${config.mqttHost}:${config.mqttPort}`;
-      
       const options: IClientOptions = {
-        clientId: `sensor-service-${Math.random().toString(16).slice(2, 10)}`,
+        clientId: `sensor-service-${randomUUID().slice(0, 8)}`,
         clean: false,
         reconnectPeriod: 5000,
         connectTimeout: 30000,
       };
-
       if (config.mqttUsername && config.mqttPassword) {
         options.username = config.mqttUsername;
         options.password = config.mqttPassword;
       }
 
       console.log(`[MQTT] Connecting to ${url}...`);
-      
       this.client = mqtt.connect(url, options);
 
-      this.client.on('connect', () => {
-        console.log('[MQTT] Connected successfully');
+      this.client.on("connect", () => {
+        console.log("[MQTT] Connected");
         this.reconnectAttempts = 0;
-        this.subscribeToSensors();
+        this.subscribe();
         resolve();
       });
-
-      this.client.on('error', (error) => {
-        console.error('[MQTT] Connection error:', error.message);
+      this.client.on("error", (error) => {
+        console.error("[MQTT] error:", error.message);
         reject(error);
       });
-
-      this.client.on('reconnect', () => {
+      this.client.on("reconnect", () => {
         this.reconnectAttempts++;
-        console.log(`[MQTT] Reconnecting... (attempt ${this.reconnectAttempts})`);
+        console.log(`[MQTT] reconnecting (#${this.reconnectAttempts})`);
       });
-
-      this.client.on('offline', () => {
-        console.log('[MQTT] Client offline');
-      });
-
-      this.client.on('message', (topic, message) => {
-        this.handleMessage(topic, message);
+      this.client.on("offline", () => console.log("[MQTT] offline"));
+      this.client.on("message", (topic, message) => {
+        void this.handleMessage(topic, message);
       });
     });
   }
 
-  private subscribeToSensors(): void {
-    if (!this.client) return;
-
-    // Subscribe to all sensor topics
-    const topics = [
-      'kennel/+/sensor/+/temperature',
-      'kennel/+/sensor/+/humidity',
-      'kennel/+/sensor/+/airquality',
-      'kennel/+/door/+/status',
-      'kennel/+/motion/+/status',
-    ];
-
-    topics.forEach(topic => {
-      this.client?.subscribe(topic, { qos: 1 }, (err) => {
-        if (err) {
-          console.error(`[MQTT] Subscribe error for ${topic}:`, err);
-        } else {
-          console.log(`[MQTT] Subscribed to ${topic}`);
-        }
+  private subscribe(): void {
+    for (const t of TOPICS) {
+      this.client?.subscribe(t, { qos: 1 }, (err) => {
+        if (err) console.error(`[MQTT] subscribe ${t}:`, err.message);
+        else console.log(`[MQTT] subscribed ${t}`);
       });
-    });
-  }
-
-  private handleMessage(topic: string, message: Buffer): void {
-    try {
-      const payload = JSON.parse(message.toString());
-      const topicParts = topic.split('/');
-      
-      // Topic: kennel/{kennelId}/sensor/{deviceId}/{type}
-      const [, kennelId, , deviceId, sensorType] = topicParts;
-      
-      console.log(`[MQTT] Sensor message on ${topic}:`, payload);
-
-      // Register or update sensor
-      storage.upsertSensor({
-        sensorId: deviceId,
-        sensorType: this.mapSensorType(sensorType),
-        kennelId,
-        name: payload.name || deviceId,
-        location: payload.location,
-      });
-
-      // Store event
-      storage.storeSensorEvent({
-        sensorId: deviceId,
-        eventType: sensorType,
-        value: payload.value || payload.temperature || payload.humidity || payload.co2 || 0,
-        unit: payload.unit || this.getUnit(sensorType),
-      });
-
-      // Update health
-      storage.updateSensorHealth({
-        sensorId: deviceId,
-        isOnline: true,
-        battery: payload.battery,
-        signal: payload.rssi,
-      });
-
-      // Check thresholds and trigger alerts
-      this.checkThresholds(deviceId, kennelId, sensorType, payload.value || payload.temperature || payload.humidity || 0);
-
-      this.emit('sensorData', { deviceId, kennelId, sensorType, payload });
-      
-    } catch (error) {
-      console.error('[MQTT] Failed to parse message:', error);
     }
   }
 
-  private mapSensorType(type: string): string {
-    const mapping: Record<string, string> = {
-      temperature: 'temperature',
-      humidity: 'humidity',
-      airquality: 'air_quality',
-      status: 'door',
-      motion: 'motion',
-    };
-    return mapping[type] || type;
-  }
+  private async handleMessage(topic: string, message: Buffer): Promise<void> {
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(message.toString());
+    } catch {
+      console.error("[MQTT] bad JSON on", topic);
+      return;
+    }
 
-  private getUnit(type: string): string {
-    const units: Record<string, string> = {
-      temperature: 'celsius',
-      humidity: 'percent',
-      air_quality: 'ppm',
-      door: 'boolean',
-      motion: 'boolean',
-    };
-    return units[type] || '';
-  }
+    const c = classifyTopic(topic);
+    if (!c) {
+      console.warn("[MQTT] unroutable topic", topic);
+      return;
+    }
 
-  private async checkThresholds(sensorId: string, kennelId: string, sensorType: string, value: number): Promise<void> {
-    if (sensorType === 'temperature') {
-      if (value > config.temperatureHigh) {
-        await storage.createAlert({
-          alertId: `alert_${Date.now()}`,
-          sensorId,
-          kennelId,
-          alertType: 'temperature_high',
-          severity: 'critical',
-          title: 'High Temperature Alert',
-          message: `Temperature too high: ${value}°C`,
+    try {
+      await storage.upsertSensor({
+        sensorId: c.deviceId,
+        sensorType: c.sensorType,
+        kennelId: c.kennelId,
+        name: typeof payload.name === "string" ? payload.name : c.deviceId,
+        location: typeof payload.location === "string" ? payload.location : undefined,
+      });
+
+      const value = readingValue(payload, c.sensorType);
+      if (Number.isFinite(value)) {
+        await storage.storeSensorEvent({
+          sensorId: c.deviceId,
+          eventType: c.sensorType,
           value,
-          threshold: config.temperatureHigh,
-        });
-      } else if (value < config.temperatureLow) {
-        await storage.createAlert({
-          alertId: `alert_${Date.now()}`,
-          sensorId,
-          kennelId,
-          alertType: 'temperature_low',
-          severity: 'warning',
-          title: 'Low Temperature Alert',
-          message: `Temperature too low: ${value}°C`,
-          value,
-          threshold: config.temperatureLow,
+          unit: typeof payload.unit === "string" ? payload.unit : c.unit,
         });
       }
+
+      await storage.updateSensorHealth({
+        sensorId: c.deviceId,
+        isOnline: true,
+        battery: typeof payload.battery === "number" ? payload.battery : undefined,
+        signal: typeof payload.rssi === "number" ? payload.rssi : undefined,
+      });
+
+      for (const draft of evaluateThresholds(c.sensorType, value, config)) {
+        const recent = await storage.hasRecentUnresolvedAlert(
+          c.deviceId,
+          draft.alertType,
+          config.alertDedupeMinutes,
+        );
+        if (recent) continue;
+        await storage.createAlert({
+          alertId: randomUUID(),
+          sensorId: c.deviceId,
+          kennelId: c.kennelId,
+          alertType: draft.alertType,
+          severity: draft.severity,
+          title: draft.title,
+          message: draft.message,
+          value,
+          threshold: draft.threshold,
+        });
+      }
+
+      this.emit("sensorData", { deviceId: c.deviceId, kennelId: c.kennelId, sensorType: c.sensorType, value });
+    } catch (err) {
+      console.error("[MQTT] handleMessage failed for", topic, err);
     }
   }
 

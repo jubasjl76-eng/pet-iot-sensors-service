@@ -179,6 +179,20 @@ class StorageService {
     return query<SensorAlert>(sql, params);
   }
 
+  async hasRecentUnresolvedAlert(
+    sensorId: string,
+    alertType: string,
+    minutes: number,
+  ): Promise<boolean> {
+    const row = await queryOne<{ n: string }>(
+      `SELECT COUNT(*)::int AS n FROM sensor_alerts
+        WHERE sensor_id = $1 AND alert_type = $2 AND resolved = false
+          AND created_at > NOW() - ($3 || ' minutes')::interval`,
+      [sensorId, alertType, minutes],
+    );
+    return Number(row?.n ?? 0) > 0;
+  }
+
   async acknowledgeAlert(alertId: string): Promise<void> {
     await query(`
       UPDATE sensor_alerts SET acknowledged = true, acknowledged_at = NOW()
