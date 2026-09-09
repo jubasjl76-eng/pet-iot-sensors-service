@@ -74,6 +74,32 @@ class BackendClient {
   }
 
   /**
+   * Send a threshold alert. Goes on the same ingest path (and offline queue) as
+   * readings, tagged eventType "alert"; the backend routes it to the care inbox.
+   */
+  async sendAlert(alert: {
+    deviceId: string;
+    deviceType: string;
+    kennelId: string;
+    alertType: string;
+    severity: string;
+    title: string;
+    message: string;
+    value: number;
+    threshold: number;
+  }): Promise<boolean> {
+    return this.sendDeviceData({
+      deviceId: alert.deviceId,
+      deviceType: alert.deviceType,
+      eventType: 'alert',
+      value: alert,
+      unit: alert.severity,
+      timestamp: Date.now(),
+      kennelId: alert.kennelId,
+    });
+  }
+
+  /**
    * Queue data for offline sync
    */
   private queueOffline(data: DeviceData): void {
