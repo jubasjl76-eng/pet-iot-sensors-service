@@ -1,18 +1,47 @@
-// Configuration
+/**
+ * Typed config contract (hardening Phase 12, A8).
+ *
+ * ONE zod schema over process.env via @jubasjl76-eng/shared; a missing/invalid
+ * var prints every problem and exits. The `config` object below keeps its
+ * camelCase domain shape so nothing else in the service had to change.
+ */
+import { loadConfig, z, envInt, envPort } from '@jubasjl76-eng/shared';
+
+const schema = z.object({
+  // public / build-time
+  PORT: envPort().default(3005),
+
+  // runtime non-secret
+  MQTT_HOST: z.string().default('localhost'),
+  MQTT_PORT: envPort().default(1883),
+  MQTT_USERNAME: z.string().optional(),
+  LOCAL_BACKEND_URL: z.string().url().optional(),
+  CLOUD_BACKEND_URL: z.string().url().optional(),
+  OFFLINE_QUEUE_FILE: z.string().default('./data/offline-queue.json'),
+  TEMP_HIGH: envInt().default(30),
+  TEMP_LOW: envInt().default(10),
+  HUMIDITY_HIGH: envInt().default(80),
+  HUMIDITY_LOW: envInt().default(25),
+  AIR_QUALITY_HIGH: envInt().default(1200),
+  ALERT_DEDUPE_MINUTES: envInt().default(15),
+
+  // secret (AWS Secrets Manager at runtime; SOPS+age for git-committed non-prod)
+  MQTT_PASSWORD: z.string().optional(),
+  API_KEY: z.string().default('smart-pet-api-key-2026'),
+});
+
+const env = loadConfig(schema, { name: 'sensors' });
+
 export interface Config {
   port: number;
-
   mqttHost: string;
   mqttPort: number;
   mqttUsername?: string;
   mqttPassword?: string;
-
   localBackendUrl?: string;
   cloudBackendUrl?: string;
   apiKey: string;
   offlineQueueFile: string;
-
-  // Alert thresholds
   temperatureHigh: number;
   temperatureLow: number;
   humidityHigh: number;
@@ -21,28 +50,20 @@ export interface Config {
   alertDedupeMinutes: number;
 }
 
-const num = (v: string | undefined, d: number) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
-};
-
 export const config: Config = {
-  port: num(process.env.PORT, 3005),
-
-  mqttHost: process.env.MQTT_HOST || "localhost",
-  mqttPort: num(process.env.MQTT_PORT, 1883),
-  mqttUsername: process.env.MQTT_USERNAME,
-  mqttPassword: process.env.MQTT_PASSWORD,
-
-  localBackendUrl: process.env.LOCAL_BACKEND_URL,
-  cloudBackendUrl: process.env.CLOUD_BACKEND_URL,
-  apiKey: process.env.API_KEY || "smart-pet-api-key-2026",
-  offlineQueueFile: process.env.OFFLINE_QUEUE_FILE || "./data/offline-queue.json",
-
-  temperatureHigh: num(process.env.TEMP_HIGH, 30),
-  temperatureLow: num(process.env.TEMP_LOW, 10),
-  humidityHigh: num(process.env.HUMIDITY_HIGH, 80),
-  humidityLow: num(process.env.HUMIDITY_LOW, 25),
-  airQualityHigh: num(process.env.AIR_QUALITY_HIGH, 1200),
-  alertDedupeMinutes: num(process.env.ALERT_DEDUPE_MINUTES, 15),
+  port: env.PORT,
+  mqttHost: env.MQTT_HOST,
+  mqttPort: env.MQTT_PORT,
+  mqttUsername: env.MQTT_USERNAME,
+  mqttPassword: env.MQTT_PASSWORD,
+  localBackendUrl: env.LOCAL_BACKEND_URL,
+  cloudBackendUrl: env.CLOUD_BACKEND_URL,
+  apiKey: env.API_KEY,
+  offlineQueueFile: env.OFFLINE_QUEUE_FILE,
+  temperatureHigh: env.TEMP_HIGH,
+  temperatureLow: env.TEMP_LOW,
+  humidityHigh: env.HUMIDITY_HIGH,
+  humidityLow: env.HUMIDITY_LOW,
+  airQualityHigh: env.AIR_QUALITY_HIGH,
+  alertDedupeMinutes: env.ALERT_DEDUPE_MINUTES,
 };
