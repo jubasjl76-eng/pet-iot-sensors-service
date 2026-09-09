@@ -1,129 +1,53 @@
 /**
- * Sensors API Routes
+ * Sensors API — a thin proxy to the backend's device/alert endpoints.
+ *
+ * Order matters: the literal /sensors/health must come before /sensors/:id, or
+ * Express matches :id = "health". (This was the bug.)
  */
 
-import { Router, Request, Response } from 'express';
-import { body, query, validationResult } from 'express-validator';
-import { storage } from '../storage/index.js';
+import { Router, Request, Response } from "express";
+import axios from "axios";
 
 const router = Router();
 
-// Validation middleware
-const validate = (req: Request, res: Response, next: Function): void => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    res.status(400).json({ errors: errors.array() });
-    return;
-  }
-  next();
-};
+const BACKEND_URL =
+  process.env.LOCAL_BACKEND_URL || process.env.CLOUD_BACKEND_URL || "http://localhost:3000/api";
+const API_KEY = process.env.API_KEY || "smart-pet-api-key-2026";
 
-// ============== SENSORS ==============
-
-// GET /api/sensors - List all sensors
-router.get('/sensors', async (req: Request, res: Response) => {
-  try {
-    const { kennel_id } = req.query;
-    const sensors = await storage.getSensors(kennel_id as string);
-    res.json({ sensors });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch sensors' });
-  }
+const api = axios.create({
+  baseURL: BACKEND_URL,
+  timeout: 10000,
+  headers: { "X-API-Key": API_KEY, "Content-Type": "application/json" },
 });
 
-// GET /api/sensors/:id - Get single sensor
-router.get('/sensors/:id', async (req: Request, res: Response) => {
-  try {
-    const sensor = await storage.getSensor(req.params.id);
-    if (!sensor) {
-      res.status(404).json({ error: 'Sensor not found' });
-      return;
+const proxy =
+  (fn: (req: Request) => Promise<{ data: unknown }>) =>
+  async (req: Request, res: Response) => {
+    try {
+      const r = await fn(req);
+      res.json(r.data);
+    } catch (err) {
+      const e = err as { message?: string };
+      res.status(502).json({ error: e.message || "backend request failed" });
     }
-    const stats = await storage.getSensorStats(req.params.id);
-    res.json({ sensor, stats });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch sensor' });
-  }
+  };
+
+// ── health ────────────────────────────────────────────────────────────────
+router.get("/health", (_req: Request, res: Response) => {
+  res.json({ status: "ok", service: "sensors", backend: BACKEND_URL, timestamp: new Date().toISOString() });
 });
 
-// GET /api/sensors/:id/events - Get sensor events
-router.get('/sensors/:id/events', async (req: Request, res: Response) => {
-  try {
-    const { type, limit } = req.query;
-    const events = type
-      ? await storage.getSensorEventsByType(req.params.id, type as string, Number(limit) || 50)
-      : await storage.getSensorEvents(req.params.id, Number(limit) || 50);
-    res.json({ events });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch events' });
-  }
-});
+router.get("/sensors/health", proxy(() => api.get("/devices/health")));
 
-// GET /api/sensors/:id/health - Get sensor health
-router.get('/sensors/:id/health', async (req: Request, res: Response) => {
-  try {
-    const health = await storage.getSensorHealth(req.params.id);
-    res.json({ health });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch health' });
-  }
-});
+// ── sensors ───────────────────────────────────────────────────────────────
+router.get("/sensors", proxy((req) => api.get("/devices", { params: { type: "sensor", kennel_id: req.query.kennel_id } })));
+router.get("/sensors/:id/events", proxy((req) => api.get(`/devices/${req.params.id}/events`, { params: { type: req.query.type, limit: req.query.limit } })));
+router.get("/sensors/:id/health", proxy((req) => api.get(`/devices/${req.params.id}/health`)));
+router.get("/sensors/:id", proxy((req) => api.get(`/devices/${req.params.id}`))); // most generic — last
 
-// GET /api/sensors/health - Get all sensors health
-router.get('/sensors/health', async (_req: Request, res: Response) => {
-  try {
-    const health = await storage.getAllSensorHealth();
-    res.json({ health });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch health' });
-  }
-});
-
-// ============== ALERTS ==============
-
-// GET /api/alerts - Get alerts
-router.get('/alerts', async (req: Request, res: Response) => {
-  try {
-    const { kennel_id, acknowledged } = req.query;
-    const alerts = await storage.getAlerts(
-      kennel_id as string,
-      acknowledged !== undefined ? acknowledged === 'true' : undefined
-    );
-    res.json({ alerts });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch alerts' });
-  }
-});
-
-// PUT /api/alerts/:id/acknowledge - Acknowledge alert
-router.put('/alerts/:id/acknowledge', async (req: Request, res: Response) => {
-  try {
-    await storage.acknowledgeAlert(req.params.id);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to acknowledge alert' });
-  }
-});
-
-// PUT /api/alerts/:id/resolve - Resolve alert
-router.put('/alerts/:id/resolve', async (req: Request, res: Response) => {
-  try {
-    await storage.resolveAlert(req.params.id);
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to resolve alert' });
-  }
-});
-
-// ============== HEALTH ==============
-
-// GET /health - Service health
-router.get('/health', (_req: Request, res: Response) => {
-  res.json({ 
-    status: 'ok', 
-    service: 'sensors',
-    timestamp: new Date().toISOString() 
-  });
-});
+// ── alerts ────────────────────────────────────────────────────────────────
+router.get("/alerts", proxy((req) => api.get("/alerts", { params: { kennel_id: req.query.kennel_id, acknowledged: req.query.acknowledged } })));
+router.put("/alerts/:id/acknowledge", proxy((req) => api.put(`/alerts/${req.params.id}/acknowledge`)));
+router.put("/alerts/:id/resolve", proxy((req) => api.put(`/alerts/${req.params.id}/resolve`)));
 
 export default router;

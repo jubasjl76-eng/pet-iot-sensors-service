@@ -2,6 +2,14 @@
 
 Handles all IoT sensor data for kennels and pet owners.
 
+## Architecture Role
+
+```
+Devices → MQTT → Sensors Service → Backend API → PostgreSQL
+```
+
+This service subscribes to MQTT topics for sensor events and forwards them to the backend API. It does NOT store data directly in databases.
+
 ## Supported Sensors
 
 - 🌡️ Temperature sensors
@@ -13,16 +21,31 @@ Handles all IoT sensor data for kennels and pet owners.
 ## Technology Stack
 
 - Node.js + TypeScript
-- PostgreSQL
 - MQTT Client
+- Backend API Client (no direct database)
 
-## Features
+## MQTT Topics (Subscribe)
 
-- Subscribe to MQTT topics for sensor events
-- Store sensor data in PostgreSQL
-- Track sensor health status
-- Trigger alerts when thresholds exceeded
-- REST API for dashboard and mobile apps
+```
+kennel/{kennelId}/sensor/{deviceId}/temperature
+kennel/{kennelId}/sensor/{deviceId}/humidity
+kennel/{kennelId}/sensor/{deviceId}/airquality
+kennel/{kennelId}/door/{deviceId}/status
+kennel/{kennelId}/motion/{deviceId}/status
+```
+
+## Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| PORT | Service port | 3005 |
+| MQTT_HOST | MQTT broker host | localhost |
+| MQTT_PORT | MQTT broker port | 1883 |
+| LOCAL_BACKEND_URL | Local backend URL | http://localhost:3000 |
+| CLOUD_BACKEND_URL | Cloud backend URL | - |
+| API_KEY | Backend API key | smart-pet-api-key-2026 |
+| TEMP_HIGH | High temp alert threshold | 30°C |
+| TEMP_LOW | Low temp alert threshold | 10°C |
 
 ## Quick Start
 
@@ -39,39 +62,22 @@ npm install
 npm run dev
 ```
 
-## Configuration
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| PORT | Service port | 3005 |
-| MQTT_HOST | MQTT broker | localhost |
-| PG_HOST | PostgreSQL host | localhost |
-| PG_DATABASE | Database name | sensors |
-| TEMP_HIGH | High temp alert threshold | 30°C |
-| TEMP_LOW | Low temp alert threshold | 10°C |
-
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | /api/sensors | List sensors |
-| GET | /api/sensors/:id | Sensor details |
-| GET | /api/sensors/:id/events | Sensor events |
-| GET | /api/sensors/:id/health | Sensor health |
-| GET | /api/sensors/health | All sensors health |
-| GET | /api/alerts | List alerts |
-| PUT | /api/alerts/:id/acknowledge | Acknowledge alert |
-| PUT | /api/alerts/:id/resolve | Resolve alert |
+| GET | /health | Service health |
+| GET | /api/status | Connection status |
 
-## MQTT Topics
+## Integration
 
-```
-kennel/{kennelId}/sensor/{deviceId}/temperature
-kennel/{kennelId}/sensor/{deviceId}/humidity
-kennel/{kennelId}/sensor/{deviceId}/airquality
-kennel/{kennelId}/door/{deviceId}/status
-kennel/{kennelId}/motion/{deviceId}/status
-```
+This service communicates with:
+- **MQTT Broker**: Receives sensor data from devices
+- **Backend API**: Sends sensor data via `POST /api/devices/ingest`
+
+## Offline Support
+
+When backend is unavailable, events are queued locally and synced when connection is restored.
 
 ## License
 
