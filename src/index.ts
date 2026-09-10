@@ -3,6 +3,8 @@
  * Main entry point - sends sensor data to backend API
  */
 
+import './instrument.js'; // Sentry — must be the very first import
+import * as Sentry from '@sentry/node';
 import express from 'express';
 import type { Server } from 'http';
 import { config } from './config/index.js';
@@ -59,6 +61,9 @@ async function main() {
   } catch (error) {
     console.error('[Service] MQTT connect failed, will retry in background:', error);
   }
+
+  // After the routes, before listen. No-op without a DSN.
+  Sentry.setupExpressErrorHandler(app);
 
   server = app.listen(config.port, () => {
     console.log(`[Service] Server running on port ${config.port}`);
