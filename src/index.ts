@@ -10,6 +10,7 @@ import type { Server } from 'http';
 import { config } from './config/index.js';
 import { mqttClient } from './mqtt/index.js';
 import { backendClient } from './services/backendClient.js';
+import { httpMetricsMiddleware, metricsHandler } from './metrics.js';
 
 const startedAt = Date.now();
 let server: Server | undefined;
@@ -29,11 +30,15 @@ async function main() {
 
   const app = express();
   app.use(express.json());
+  app.use(httpMetricsMiddleware);
 
   // Liveness: the process is up. Always 200.
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', service: 'sensors', uptimeS: Math.round((Date.now() - startedAt) / 1000) });
   });
+
+  // Prometheus metrics (Phase 16).
+  app.get('/metrics', metricsHandler);
 
   // Readiness: safe to route traffic. 503 until the MQTT dep is connected.
   app.get('/ready', (_req, res) => {
