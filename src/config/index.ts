@@ -25,6 +25,13 @@ const schema = z.object({
   AIR_QUALITY_HIGH: envInt().default(1200),
   ALERT_DEDUPE_MINUTES: envInt().default(15),
 
+  // error tracking (Phase 15) — read raw in src/instrument.ts; in the schema so
+  // boot still validates them. A DSN is not a secret.
+  SENTRY_DSN: z.string().optional(),
+  SENTRY_ENVIRONMENT: z.string().optional(),
+  SENTRY_RELEASE: z.string().optional(),
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),
+
   // secret (AWS Secrets Manager at runtime; SOPS+age for git-committed non-prod)
   MQTT_PASSWORD: z.string().optional(),
   API_KEY: z.string().default('smart-pet-api-key-2026'),
