@@ -6,6 +6,7 @@
 import './instrument.js'; // Sentry — must be the very first import
 import * as Sentry from '@sentry/node';
 import express from 'express';
+import helmet from 'helmet';
 import type { Server } from 'http';
 import { config } from './config/index.js';
 import { mqttClient } from './mqtt/index.js';
@@ -24,6 +25,17 @@ async function main() {
   );
 
   const app = express();
+
+  // Security headers (Phase 18, A12 #11). Pure JSON API — nothing to render —
+  // so `default-src 'none'`; helmet's defaults add HSTS / nosniff / frameguard
+  // and drop `X-Powered-By`.
+  app.use(helmet({
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: { 'default-src': ["'none'"], 'frame-ancestors': ["'none'"] },
+    },
+  }));
+
   app.use(express.json());
   app.use(httpMetricsMiddleware);
 
