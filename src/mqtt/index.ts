@@ -10,6 +10,9 @@ import { config } from "../config/index.js";
 import { backendClient } from "../services/backendClient.js";
 import { classifyTopic, readingValue } from "./topic.js";
 import { evaluateThresholds, AlertDedupe } from "./alerts.js";
+import { log } from "../log.js";
+
+const mlog = log.child({ mod: "mqtt" });
 
 const TOPICS = [
   "kennel/+/sensor/+/temperature",
@@ -38,24 +41,24 @@ export class MQTTSensorClient extends EventEmitter {
         options.password = config.mqttPassword;
       }
 
-      console.log(`[MQTT] Connecting to ${url}...`);
+      mlog.info({ url }, "connecting");
       this.client = mqtt.connect(url, options);
 
       this.client.on("connect", () => {
-        console.log("[MQTT] Connected");
+        mlog.info("connected");
         this.reconnectAttempts = 0;
         this.subscribe();
         resolve();
       });
       this.client.on("error", (error) => {
-        console.error("[MQTT] error:", error.message);
+        mlog.error({ err: error }, "error");
         reject(error);
       });
       this.client.on("reconnect", () => {
         this.reconnectAttempts++;
-        console.log(`[MQTT] reconnecting (#${this.reconnectAttempts})`);
+        mlog.warn({ attempt: this.reconnectAttempts }, "reconnecting");
       });
-      this.client.on("offline", () => console.log("[MQTT] offline"));
+      this.client.on("offline", () => mlog.warn("offline"));
       this.client.on("message", (topic, message) => {
         void this.handleMessage(topic, message);
       });
@@ -65,8 +68,8 @@ export class MQTTSensorClient extends EventEmitter {
   private subscribe(): void {
     for (const t of TOPICS) {
       this.client?.subscribe(t, { qos: 1 }, (err) => {
-        if (err) console.error(`[MQTT] subscribe ${t}:`, err.message);
-        else console.log(`[MQTT] subscribed ${t}`);
+        if (err) mlog.error({ err, topic: t }, "subscribe failed");
+        else mlog.debug({ topic: t }, "subscribed");
       });
     }
   }
@@ -76,13 +79,13 @@ export class MQTTSensorClient extends EventEmitter {
     try {
       payload = JSON.parse(message.toString());
     } catch {
-      console.error("[MQTT] bad JSON on", topic);
+      mlog.warn({ topic }, "bad JSON");
       return;
     }
 
     const c = classifyTopic(topic);
     if (!c) {
-      console.warn("[MQTT] unroutable topic", topic);
+      mlog.warn({ topic }, "unroutable topic");
       return;
     }
 
