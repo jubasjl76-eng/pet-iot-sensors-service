@@ -63,6 +63,7 @@ jobs:
       id-token: write
       contents: read
     uses: jubasjl76-eng/smart-pet-ci/.github/workflows/deploy-ecs.yml@main
+    secrets: inherit   # SENTRY_AUTH_TOKEN / SENTRY_ORG (org secrets), if set
     with:
       environment: ${{ needs.target.outputs.env }}
       service: sensors
@@ -73,3 +74,4 @@ jobs:
       aws-region: ${{ needs.gate.outputs.region }}
       role-to-assume: ${{ needs.gate.outputs.role }}
       run-migrations: false
+      sentry-project: pet-iot-sensors-service
