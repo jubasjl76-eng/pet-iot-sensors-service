@@ -39,6 +39,9 @@ const schema = z.object({
   // secret (AWS Secrets Manager at runtime; SOPS+age for git-committed non-prod)
   MQTT_PASSWORD: z.string().optional(),
   API_KEY: z.string().default('smart-pet-api-key-2026'),
+  // Unset (dev/local) → src/redis.ts exports `redis: null`, every consumer
+  // (the rate-limit stack) falls back to in-process behavior (Phase 20).
+  REDIS_URL: z.string().optional(),
 });
 
 const env = loadConfig(schema, { name: 'sensors' });
@@ -59,6 +62,7 @@ export interface Config {
   humidityLow: number;
   airQualityHigh: number;
   alertDedupeMinutes: number;
+  redisUrl?: string;
 }
 
 export const config: Config = {
@@ -77,4 +81,5 @@ export const config: Config = {
   humidityLow: env.HUMIDITY_LOW,
   airQualityHigh: env.AIR_QUALITY_HIGH,
   alertDedupeMinutes: env.ALERT_DEDUPE_MINUTES,
+  redisUrl: env.REDIS_URL,
 };
