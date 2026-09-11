@@ -11,6 +11,7 @@ import type { Server } from 'http';
 import { config } from './config/index.js';
 import { mqttClient } from './mqtt/index.js';
 import { backendClient } from './services/backendClient.js';
+import { redis, redisHealthy, closeRedis } from './redis.js';
 import { httpMetricsMiddleware, metricsHandler } from './metrics.js';
 import { log } from './log.js';
 
@@ -47,12 +48,17 @@ async function main() {
   // Prometheus metrics (Phase 16).
   app.get('/metrics', metricsHandler);
 
-  // Readiness: safe to route traffic. 503 until the MQTT dep is connected.
-  app.get('/ready', (_req, res) => {
+  // Readiness: safe to route traffic. 503 until the MQTT dep is connected
+  // and (when REDIS_URL is set) Redis PINGs. `redis` is `null` in the body
+  // when unconfigured (dev/local, expected) rather than a failure.
+  app.get('/ready', async (_req, res) => {
     const mqtt = mqttClient.isConnected();
-    res.status(mqtt && !shuttingDown ? 200 : 503).json({
-      status: mqtt && !shuttingDown ? 'ready' : 'not-ready',
+    const redisOk = await redisHealthy();
+    const ok = mqtt && redisOk && !shuttingDown;
+    res.status(ok ? 200 : 503).json({
+      status: ok ? 'ready' : 'not-ready',
       mqtt,
+      redis: redis ? redisOk : null,
       backendOnline: backendClient.isOnline(), // informational — offline queue tolerates a down backend
       shuttingDown,
     });
@@ -97,16 +103,17 @@ function shutdown(signal?: string) {
   }, 10_000);
   guard.unref();
 
-  const done = () => {
+  const done = async () => {
     backendClient.stop();
     mqttClient.disconnect();
+    await closeRedis();
     clearTimeout(guard);
     log.info('stopped');
     process.exit(0);
   };
 
-  if (server) server.close(() => done());
-  else done();
+  if (server) server.close(() => void done());
+  else void done();
 }
 
 main();
